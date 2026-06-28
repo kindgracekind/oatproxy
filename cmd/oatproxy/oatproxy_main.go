@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -35,8 +37,8 @@ func Run() error {
 	host := fs.String("host", "", "public HTTPS address where this OAuth provider is hosted (ex example.com, no https:// prefix)")
 	dbPath := fs.String("db", "oatproxy.sqlite3", "path to the database file or postgres connection string")
 	verbose := fs.Bool("v", false, "enable verbose logging")
-	scope := fs.String("scope", "atproto transition:generic", "scope to use for the OAuth provider")
-	clientMetadata := fs.String("client-metadata", "", "JSON client metadata or path to JSON file containing client metadata")
+	scope := fs.String("scope", "", "scope to use for the OAuth provider (defaults to the scope field in client metadata, or 'atproto transition:generic')")
+	clientMetadata := fs.String("client-metadata", "", "JSON client metadata, path to a JSON file, or https:// URL serving client metadata")
 	httpAddr := fs.String("http-addr", ":8080", "HTTP address to listen on")
 	upstreamHost := fs.String("upstream-host", "", "act as a reverse proxy for this upstream host (ex http://localhost:8081)")
 	defaultPDS := fs.String("default-pds", "", "default PDS to use if no handle is provided")
@@ -77,24 +79,43 @@ func Run() error {
 		return err
 	}
 
-	var meta *oatproxy.OAuthClientMetadata
-	if (*clientMetadata)[0] != '{' {
-		// path
-		bs, err := os.ReadFile(*clientMetadata)
+	if *clientMetadata == "" {
+		return fmt.Errorf("client-metadata is required")
+	}
+	var metaBytes []byte
+	switch {
+	case (*clientMetadata)[0] == '{':
+		metaBytes = []byte(*clientMetadata)
+	case strings.HasPrefix(*clientMetadata, "https://") || strings.HasPrefix(*clientMetadata, "http://"):
+		resp, err := http.Get(*clientMetadata)
+		if err != nil {
+			return fmt.Errorf("fetching client-metadata from %s: %w", *clientMetadata, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("fetching client-metadata from %s: status %d", *clientMetadata, resp.StatusCode)
+		}
+		metaBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("reading client-metadata from %s: %w", *clientMetadata, err)
+		}
+	default:
+		metaBytes, err = os.ReadFile(*clientMetadata)
 		if err != nil {
 			return err
 		}
-		meta = &oatproxy.OAuthClientMetadata{}
-		err = json.Unmarshal(bs, meta)
-		if err != nil {
-			return err
-		}
-	} else {
-		// JSON
-		err = json.Unmarshal([]byte(*clientMetadata), meta)
-		if err != nil {
-			return err
-		}
+	}
+	meta := &oatproxy.OAuthClientMetadata{}
+	if err := json.Unmarshal(metaBytes, meta); err != nil {
+		return fmt.Errorf("parsing client-metadata: %w", err)
+	}
+
+	resolvedScope := *scope
+	if resolvedScope == "" {
+		resolvedScope = meta.Scope
+	}
+	if resolvedScope == "" {
+		resolvedScope = "atproto transition:generic"
 	}
 
 	upstreamKey, err := store.GetKey(UPSTREAM_KEY)
@@ -110,7 +131,7 @@ func Run() error {
 		CreateOAuthSession: store.CreateOAuthSession,
 		UpdateOAuthSession: store.UpdateOAuthSession,
 		GetOAuthSession:    store.GetOAuthSession,
-		Scope:              *scope,
+		Scope:              resolvedScope,
 		ClientMetadata:     meta,
 		UpstreamJWK:        upstreamKey,
 		DownstreamJWK:      downstreamKey,
