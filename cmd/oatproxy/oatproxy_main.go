@@ -43,6 +43,7 @@ func Run() error {
 	httpAddr := fs.String("http-addr", ":8080", "HTTP address to listen on")
 	upstreamHost := fs.String("upstream-host", "", "act as a reverse proxy for this upstream host (ex http://localhost:8081)")
 	defaultPDS := fs.String("default-pds", "", "default PDS to use if no handle is provided")
+	downstreamClientMetadataPath := fs.String("downstream-client-metadata-path", "", "URL path where the downstream client metadata is served (defaults to /oauth/downstream/client-metadata.json)")
 	// version := fs.Bool("version", false, "print version and exit")
 
 	err := ff.Parse(
@@ -117,6 +118,7 @@ func Run() error {
 		UpstreamJWK:        upstreamKey,
 		DownstreamJWK:      downstreamKey,
 		DefaultPDS:         *defaultPDS,
+		DownstreamClientMetadataPath: *downstreamClientMetadataPath,
 	})
 
 	if *upstreamHost != "" {

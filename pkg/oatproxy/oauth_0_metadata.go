@@ -142,7 +142,7 @@ func generateOAuthServerMetadata(host string) map[string]any {
 func (o *OATProxy) GetDownstreamMetadata(redirectURI string) (*OAuthClientMetadata, error) {
 	meta := *o.getClientMetadata()
 	if !o.public {
-		meta.ClientID = fmt.Sprintf("https://%s/oauth/downstream/client-metadata.json", o.host)
+		meta.ClientID = fmt.Sprintf("https://%s%s", o.host, o.downstreamClientMetadataPath)
 	} else {
 		u := o.publicClientID(redirectURI)
 		meta.ClientID = u.String()
