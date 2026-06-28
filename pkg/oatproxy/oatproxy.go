@@ -28,6 +28,7 @@ type OATProxy struct {
 	httpClient          *http.Client
 	rateLimitCache      *cache.Cache
 	downstreamClientMetadataPath string
+	upstreamClientMetadataPath   string
 
 	mu             sync.RWMutex
 	scope          string
@@ -71,10 +72,8 @@ type Config struct {
 	DefaultPDS     string
 	Public         bool
 	HTTPClient     *http.Client
-	// Path (with leading slash) at which the downstream client metadata is
-	// served and advertised as client_id. Defaults to
-	// "/oauth/downstream/client-metadata.json".
 	DownstreamClientMetadataPath string
+	UpstreamClientMetadataPath string
 }
 
 func New(conf *Config) *OATProxy {
@@ -98,11 +97,17 @@ func New(conf *Config) *OATProxy {
 		public:              conf.Public,
 		rateLimitCache:      cache.New(-1, 10*time.Minute),
 		downstreamClientMetadataPath: conf.DownstreamClientMetadataPath,
+		upstreamClientMetadataPath:   conf.UpstreamClientMetadataPath,
 	}
 	if o.downstreamClientMetadataPath == "" {
 		o.downstreamClientMetadataPath = "/oauth/downstream/client-metadata.json"
 	} else if !strings.HasPrefix(o.downstreamClientMetadataPath, "/") {
 		o.downstreamClientMetadataPath = "/" + o.downstreamClientMetadataPath
+	}
+	if o.upstreamClientMetadataPath == "" {
+		o.upstreamClientMetadataPath = "/oauth/upstream/client-metadata.json"
+	} else if !strings.HasPrefix(o.upstreamClientMetadataPath, "/") {
+		o.upstreamClientMetadataPath = "/" + o.upstreamClientMetadataPath
 	}
 	if conf.HTTPClient != nil {
 		o.httpClient = conf.HTTPClient
@@ -130,7 +135,7 @@ func New(conf *Config) *OATProxy {
 	o.Echo.GET("/oauth/return", o.HandleOAuthReturn)
 	o.Echo.POST("/oauth/token", o.DPoPNonceMiddleware(o.HandleOAuthToken))
 	o.Echo.POST("/oauth/revoke", o.DPoPNonceMiddleware(o.HandleOAuthRevoke))
-	o.Echo.GET("/oauth/upstream/client-metadata.json", o.HandleClientMetadataUpstream)
+	o.Echo.GET(o.upstreamClientMetadataPath, o.HandleClientMetadataUpstream)
 	o.Echo.GET("/oauth/upstream/jwks.json", o.HandleJwksUpstream)
 	o.Echo.GET(o.downstreamClientMetadataPath, o.HandleClientMetadataDownstream)
 	o.Echo.Any("/xrpc/*", o.OAuthMiddleware(o.HandleWildcard))

@@ -83,7 +83,7 @@ func (o *OATProxy) GetUpstreamMetadata() *OAuthClientMetadata {
 	meta.TokenEndpointAuthSigningAlg = "ES256"
 	if !o.public {
 		meta.RedirectURIs = []string{fmt.Sprintf("https://%s/oauth/return", o.host)}
-		meta.ClientID = fmt.Sprintf("https://%s/oauth/upstream/client-metadata.json", o.host)
+		meta.ClientID = fmt.Sprintf("https://%s%s", o.host, o.upstreamClientMetadataPath)
 	} else {
 		u, err := url.Parse(meta.RedirectURIs[0])
 		if err != nil {
