@@ -39,6 +39,7 @@ func Run() error {
 	verbose := fs.Bool("v", false, "enable verbose logging")
 	scope := fs.String("scope", "", "scope to use for the OAuth provider (defaults to the scope field in client metadata, or 'atproto transition:generic')")
 	clientMetadata := fs.String("client-metadata", "", "JSON client metadata, path to a JSON file, or https:// URL serving client metadata")
+	clientMetadataRefresh := fs.Duration("client-metadata-refresh", 5*time.Minute, "interval to re-fetch URL-sourced client metadata (set 0 to disable)")
 	httpAddr := fs.String("http-addr", ":8080", "HTTP address to listen on")
 	upstreamHost := fs.String("upstream-host", "", "act as a reverse proxy for this upstream host (ex http://localhost:8081)")
 	defaultPDS := fs.String("default-pds", "", "default PDS to use if no handle is provided")
@@ -82,41 +83,21 @@ func Run() error {
 	if *clientMetadata == "" {
 		return fmt.Errorf("client-metadata is required")
 	}
-	var metaBytes []byte
-	switch {
-	case (*clientMetadata)[0] == '{':
-		metaBytes = []byte(*clientMetadata)
-	case strings.HasPrefix(*clientMetadata, "https://") || strings.HasPrefix(*clientMetadata, "http://"):
-		resp, err := http.Get(*clientMetadata)
-		if err != nil {
-			return fmt.Errorf("fetching client-metadata from %s: %w", *clientMetadata, err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("fetching client-metadata from %s: status %d", *clientMetadata, resp.StatusCode)
-		}
-		metaBytes, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("reading client-metadata from %s: %w", *clientMetadata, err)
-		}
-	default:
-		metaBytes, err = os.ReadFile(*clientMetadata)
-		if err != nil {
-			return err
-		}
+	isURL := strings.HasPrefix(*clientMetadata, "https://") || strings.HasPrefix(*clientMetadata, "http://")
+	meta, err := loadClientMetadata(*clientMetadata)
+	if err != nil {
+		return err
 	}
-	meta := &oatproxy.OAuthClientMetadata{}
-	if err := json.Unmarshal(metaBytes, meta); err != nil {
-		return fmt.Errorf("parsing client-metadata: %w", err)
+	resolveScope := func(m *oatproxy.OAuthClientMetadata) string {
+		if *scope != "" {
+			return *scope
+		}
+		if m.Scope != "" {
+			return m.Scope
+		}
+		return "atproto transition:generic"
 	}
-
-	resolvedScope := *scope
-	if resolvedScope == "" {
-		resolvedScope = meta.Scope
-	}
-	if resolvedScope == "" {
-		resolvedScope = "atproto transition:generic"
-	}
+	resolvedScope := resolveScope(meta)
 
 	upstreamKey, err := store.GetKey(UPSTREAM_KEY)
 	if err != nil {
@@ -162,6 +143,22 @@ func Run() error {
 		o.Echo.Any("/*", reverseEcho)
 	}
 
+	if isURL && *clientMetadataRefresh > 0 {
+		go func() {
+			ticker := time.NewTicker(*clientMetadataRefresh)
+			defer ticker.Stop()
+			for range ticker.C {
+				next, err := loadClientMetadata(*clientMetadata)
+				if err != nil {
+					logger.Warn("failed to refresh client metadata, keeping previous", "error", err, "source", *clientMetadata)
+					continue
+				}
+				o.SetClientMetadata(next, resolveScope(next))
+				logger.Info("refreshed client metadata", "source", *clientMetadata)
+			}
+		}()
+	}
+
 	server := &http.Server{
 		Addr:    *httpAddr,
 		Handler: o.Echo,
@@ -173,4 +170,39 @@ func Run() error {
 	}
 
 	return nil
+}
+
+func loadClientMetadata(source string) (*oatproxy.OAuthClientMetadata, error) {
+	if source == "" {
+		return nil, fmt.Errorf("client-metadata is required")
+	}
+	var bs []byte
+	switch {
+	case source[0] == '{':
+		bs = []byte(source)
+	case strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://"):
+		resp, err := http.Get(source)
+		if err != nil {
+			return nil, fmt.Errorf("fetching client-metadata from %s: %w", source, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fetching client-metadata from %s: status %d", source, resp.StatusCode)
+		}
+		bs, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading client-metadata from %s: %w", source, err)
+		}
+	default:
+		var err error
+		bs, err = os.ReadFile(source)
+		if err != nil {
+			return nil, err
+		}
+	}
+	meta := &oatproxy.OAuthClientMetadata{}
+	if err := json.Unmarshal(bs, meta); err != nil {
+		return nil, fmt.Errorf("parsing client-metadata: %w", err)
+	}
+	return meta, nil
 }

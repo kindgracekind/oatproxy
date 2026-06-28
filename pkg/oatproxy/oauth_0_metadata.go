@@ -60,14 +60,14 @@ func (o *OATProxy) publicClientID(redirectURI string) *url.URL {
 		Scheme: "http",
 	}
 	q := u.Query()
-	q.Set("scope", o.scope)
+	q.Set("scope", o.getScope())
 	q.Set("redirect_uri", redirectURI)
 	u.RawQuery = q.Encode()
 	return &u
 }
 
 func (o *OATProxy) GetUpstreamMetadata() *OAuthClientMetadata {
-	meta := *o.clientMetadata
+	meta := *o.getClientMetadata()
 	meta.JwksURI = fmt.Sprintf("https://%s/oauth/upstream/jwks.json", o.host)
 	meta.ClientURI = fmt.Sprintf("https://%s", o.host)
 	meta.TokenEndpointAuthMethod = "private_key_jwt"
@@ -134,7 +134,7 @@ func generateOAuthServerMetadata(host string) map[string]any {
 }
 
 func (o *OATProxy) GetDownstreamMetadata(redirectURI string) (*OAuthClientMetadata, error) {
-	meta := *o.clientMetadata
+	meta := *o.getClientMetadata()
 	if !o.public {
 		meta.ClientID = fmt.Sprintf("https://%s/oauth/downstream/client-metadata.json", o.host)
 	} else {

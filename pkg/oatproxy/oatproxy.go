@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -18,15 +19,38 @@ type OATProxy struct {
 	lock                func(id string) (func(), error)
 	Echo                *echo.Echo
 	host                string
-	scope               string
 	upstreamJWK         jwk.Key
 	downstreamJWK       jwk.Key
 	slog                *slog.Logger
-	clientMetadata      *OAuthClientMetadata
 	defaultPDS          string
 	public              bool
 	httpClient          *http.Client
 	rateLimitCache      *cache.Cache
+
+	mu             sync.RWMutex
+	scope          string
+	clientMetadata *OAuthClientMetadata
+}
+
+// SetClientMetadata atomically updates the client metadata and scope used by the proxy.
+// Safe to call from any goroutine.
+func (o *OATProxy) SetClientMetadata(meta *OAuthClientMetadata, scope string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.clientMetadata = meta
+	o.scope = scope
+}
+
+func (o *OATProxy) getClientMetadata() *OAuthClientMetadata {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.clientMetadata
+}
+
+func (o *OATProxy) getScope() string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.scope
 }
 
 type Config struct {

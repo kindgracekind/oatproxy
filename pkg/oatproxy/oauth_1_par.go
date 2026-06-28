@@ -158,7 +158,8 @@ func (o *OATProxy) NewPAR(ctx context.Context, c echo.Context, par *PAR, dpopHea
 		return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid response type: expected code, got %s", par.ResponseType))
 	}
 
-	if par.Scope != o.scope {
+	scope := o.getScope()
+	if par.Scope != scope {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid scope")
 	}
 
@@ -170,8 +171,8 @@ func (o *OATProxy) NewPAR(ctx context.Context, c echo.Context, par *PAR, dpopHea
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "state is required")
 	}
 
-	if par.Scope != o.scope {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid scope (expected %s, got %s)", o.scope, par.Scope))
+	if par.Scope != scope {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid scope (expected %s, got %s)", scope, par.Scope))
 	}
 
 	realRedirectURI, err := redirectTruther(par.RedirectURI)
